@@ -273,7 +273,7 @@ async function load() {
   const adapter = await navigator.gpu?.requestAdapter();
   if (!adapter) {
     setStep("gpu", "fail", "not available");
-    $("banners").innerHTML = `<div class="banner">This needs WebGPU (Chrome or Edge on a machine with a GPU). On Linux, enable <code>chrome://flags/#enable-unsafe-webgpu</code> and <code>chrome://flags/#enable-vulkan</code>, then relaunch.</div>`;
+    $("banners").innerHTML = `<div class="banner">This needs WebGPU, which current Chrome and Edge have on Windows and Mac. If you're on one of those, check that <b>Settings → System → Use graphics acceleration when available</b> is on, update the browser, then relaunch. On Linux, enable <code>chrome://flags/#enable-unsafe-webgpu</code> and <code>chrome://flags/#enable-vulkan</code>.</div>`;
     status("WebGPU unavailable, so the models can't run here.");
     clearInterval(elapsedTimer); return;
   }

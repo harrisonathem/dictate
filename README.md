@@ -10,7 +10,9 @@ After the first visit, the models load from the browser cache in seconds.
 
 ## Requirements
 
-Chrome or Edge on a computer with a GPU. On Linux, turn on `chrome://flags/#enable-unsafe-webgpu` and `chrome://flags/#enable-vulkan`, then relaunch.
+Current Chrome or Edge on Windows or Mac. WebGPU is on by default there; if the page says it's missing, turn on *Settings → System → Use graphics acceleration when available* and relaunch.
+
+On Linux, WebGPU is only on by default for some GPUs. Otherwise, turn on `chrome://flags/#enable-unsafe-webgpu` and `chrome://flags/#enable-vulkan`, then relaunch.
 
 ## How it works
 
