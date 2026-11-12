@@ -1,0 +1,820 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Privacy guard: the page may only fetch code from jsDelivr and model weights from Hugging Face.
+  Audio and text have nowhere else to go. Gemini Nano downloads happen inside Chrome, outside this CSP.
+-->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net;
+  worker-src 'self' blob:;
+  connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co;
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data:;
+  media-src 'self' blob:;
+">
+<title>Dictate Bench</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1f22; --muted: #6a6f76; --line: #e2e0da;
+  --accent: #1f6f5c; --accent-ink: #ffffff; --warn-bg: #fff3c4; --warn-ink: #7a5600;
+  --bad: #b3261e; --ok: #1f6f5c; --rec: #c62828; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a; --panel: #1d2024; --ink: #e8e6e1; --muted: #9aa0a6; --line: #30343a;
+    --accent: #4fb39a; --accent-ink: #0d1412; --warn-bg: #4a3b0a; --warn-ink: #ffe08a;
+    --bad: #ff8a80; --ok: #6fd1b6; --rec: #ff5252;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 60px; }
+header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+.pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.pill.ok { color: var(--ok); border-color: currentColor; }
+.pill.bad { color: var(--bad); border-color: currentColor; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+select, input[type=text], textarea {
+  font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; width: 100%;
+}
+textarea { resize: vertical; }
+button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--ink); padding: 7px 14px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+#cap { font-size: 13px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+#cap dt { color: var(--muted); } #cap dd { margin: 0; font-family: var(--mono); font-size: 12px; }
+.yes { color: var(--ok); } .no { color: var(--bad); } .maybe { color: var(--warn-ink); }
+#recbtn { width: 64px; height: 64px; border-radius: 50%; border: 3px solid var(--rec); background: var(--panel); position: relative; padding: 0; }
+#recbtn::after { content: ""; position: absolute; inset: 14px; border-radius: 50%; background: var(--rec); transition: all .15s; }
+#recbtn.on::after { inset: 20px; border-radius: 4px; }
+#timer { font-family: var(--mono); font-size: 20px; min-width: 70px; }
+#meter { width: 160px; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+#meter > div { height: 100%; width: 0; background: var(--accent); transition: width .08s; }
+.cols { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+@media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
+.out { min-height: 260px; white-space: pre-wrap; outline: none; font-size: 15px; line-height: 1.6; }
+#transcript { min-height: 260px; border: none; background: transparent; padding: 0; }
+.interim { color: var(--muted); font-style: italic; }
+mark { background: var(--warn-bg); color: var(--warn-ink); border-radius: 3px; padding: 0 2px; }
+#checks { font-size: 13px; margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+#checks li { margin: 2px 0; }
+#status { font-size: 13px; color: var(--muted); font-family: var(--mono); min-height: 1.5em; }
+.prog { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 6px; display: none; }
+.prog > div { height: 100%; width: 0; background: var(--accent); }
+.banner { background: var(--warn-bg); color: var(--warn-ink); padding: 8px 12px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; }
+.hint { font-size: 12px; color: var(--muted); }
+details summary { cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Dictate · bench</h1>
+    <span class="pill" id="privacyPill">checking…</span>
+    <span class="hint">Clinical dictation → formatted note. Models run in this browser; nothing is stored.</span>
+  </header>
+
+  <div id="banners"></div>
+
+  <section class="card">
+    <h2>Engines</h2>
+    <div class="grid">
+      <label>Transcriber
+        <select id="asrSel"></select>
+      </label>
+      <label>Formatter
+        <select id="llmSel"></select>
+      </label>
+      <label>Note style
+        <select id="styleSel">
+          <option value="prose">Formal prose</option>
+          <option value="soap">SOAP note</option>
+          <option value="letter">Clinic letter to GP / referrer</option>
+          <option value="bullets">Concise problem-based summary</option>
+        </select>
+      </label>
+      <label>Spelling
+        <select id="spellSel">
+          <option value="British">British English</option>
+          <option value="American">American English</option>
+        </select>
+      </label>
+    </div>
+    <label style="margin-top:10px">Vocabulary hints (drug names, eponyms, local terms; helps the formatter fix mis-hearings)
+      <input type="text" id="vocab" placeholder="e.g. apixaban, Dupuytren's, eGFR, Mr Okonkwo">
+    </label>
+    <div class="row" style="margin-top:12px">
+      <button id="loadBtn" class="primary">Load selected engines</button>
+      <label class="row" style="flex-direction:row;gap:6px"><input type="checkbox" id="autoFmt" checked> Write the note automatically when recording stops</label>
+    </div>
+    <div class="prog" id="prog"><div></div></div>
+    <div id="status"></div>
+    <details style="margin-top:10px">
+      <summary class="hint">What this browser supports</summary>
+      <dl id="cap" style="margin-top:8px"></dl>
+    </details>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <button id="recbtn" title="Record" aria-label="Record"></button>
+      <span id="timer">0:00</span>
+      <div id="meter"><div></div></div>
+      <span class="hint">or</span>
+      <label class="row" style="flex-direction:row"><input type="file" id="fileIn" accept="audio/*,video/*"></label>
+      <span style="flex:1"></span>
+      <button id="fmtBtn">Write note</button>
+      <button id="stopGen" disabled>Stop</button>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="card">
+      <h2>Transcript <span class="hint" style="text-transform:none;letter-spacing:0">(editable)</span></h2>
+      <textarea id="transcript" class="out" spellcheck="false" placeholder="Dictation appears here…"></textarea>
+      <div id="interim" class="interim"></div>
+    </section>
+    <section class="card">
+      <h2>Note <span class="hint" style="text-transform:none;letter-spacing:0">(draft: check before use)</span></h2>
+      <div id="note" class="out" contenteditable="plaintext-only" spellcheck="true"></div>
+      <div id="checks" hidden></div>
+      <div class="row" style="margin-top:10px">
+        <button id="copyBtn">Copy note</button>
+        <button id="recheck">Re-check</button>
+        <button id="clearBtn">Clear all</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- ===================== Worker: transformers.js (ASR + LLM) ===================== -->
+<script type="text/plain" id="worker-src">
+import { pipeline, AutoTokenizer, AutoModelForCausalLM, TextStreamer, InterruptableStoppingCriteria, env }
+  from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/dist/transformers.min.js";
+
+env.allowLocalModels = false;
+let asr = null, asrKey = null;
+let llm = null, llmKey = null;
+const stopper = new InterruptableStoppingCriteria();
+
+const progress = (stage) => (p) => {
+  if (p.status === "progress") postMessage({ type: "progress", stage, file: p.file, loaded: p.loaded, total: p.total });
+};
+
+self.onmessage = async ({ data }) => {
+  try {
+    switch (data.type) {
+      case "load-asr": {
+        const key = JSON.stringify(data.spec);
+        if (asrKey !== key) {
+          asr?.dispose?.();
+          asr = await pipeline("automatic-speech-recognition", data.spec.model, {
+            device: data.spec.device, dtype: data.spec.dtype, progress_callback: progress("asr"),
+          });
+          asrKey = key;
+          // Warm up: compiles shaders so the first real chunk isn't slow.
+          await asr(new Float32Array(16000), data.spec.opts ?? {});
+        }
+        postMessage({ type: "loaded", stage: "asr" });
+        break;
+      }
+      case "transcribe": {
+        const t0 = performance.now();
+        const out = await asr(data.audio, data.opts ?? {});
+        postMessage({ type: "asr-result", id: data.id, text: (out.text ?? "").trim(), ms: performance.now() - t0, secs: data.audio.length / 16000 });
+        break;
+      }
+      case "load-llm": {
+        const key = JSON.stringify(data.spec);
+        if (llmKey !== key) {
+          await llm?.model?.dispose?.();
+          const tokenizer = await AutoTokenizer.from_pretrained(data.spec.model, { progress_callback: progress("llm") });
+          const model = await AutoModelForCausalLM.from_pretrained(data.spec.model, {
+            device: data.spec.device, dtype: data.spec.dtype, progress_callback: progress("llm"),
+          });
+          llm = { tokenizer, model }; llmKey = key;
+        }
+        postMessage({ type: "loaded", stage: "llm" });
+        break;
+      }
+      case "generate": {
+        const { tokenizer, model } = llm;
+        const inputs = tokenizer.apply_chat_template(data.messages, {
+          add_generation_prompt: true, return_dict: true, enable_thinking: false,
+        });
+        stopper.reset();
+        const t0 = performance.now(); let n = 0;
+        const streamer = new TextStreamer(tokenizer, {
+          skip_prompt: true, skip_special_tokens: true,
+          callback_function: (text) => { n++; postMessage({ type: "token", id: data.id, text }); },
+        });
+        await model.generate({
+          ...inputs, max_new_tokens: data.max_new_tokens ?? 1200, do_sample: false,
+          repetition_penalty: 1.05, streamer, stopping_criteria: stopper,
+        });
+        postMessage({ type: "gen-done", id: data.id, ms: performance.now() - t0, chunks: n });
+        break;
+      }
+      case "abort": stopper.interrupt(); break;
+    }
+  } catch (err) {
+    postMessage({ type: "error", id: data.id, stage: data.type, message: String(err?.message ?? err) });
+  }
+};
+postMessage({ type: "boot" });
+</script>
+
+<!-- ===================== AudioWorklet: raw PCM capture ===================== -->
+<script type="text/plain" id="worklet-src">
+class Tap extends AudioWorkletProcessor {
+  process(inputs) {
+    const ch = inputs[0]?.[0];
+    if (ch) this.port.postMessage(ch.slice(0));
+    return true;
+  }
+}
+registerProcessor("tap", Tap);
+</script>
+
+<script type="module">
+// ---------------------------------------------------------------------------
+// Engine catalogue
+// ---------------------------------------------------------------------------
+const ASR = {
+  "whisper-turbo": { label: "Whisper large-v3-turbo · ~560 MB · WebGPU", needsGPU: true,
+    spec: f16 => ({ model: "onnx-community/whisper-large-v3-turbo", device: "webgpu",
+      dtype: { encoder_model: f16 ? "q4f16" : "q4", decoder_model_merged: f16 ? "q4f16" : "q4" },
+      opts: { language: "en", task: "transcribe" } }) },
+  "whisper-small": { label: "Whisper small · ~250 MB · WebGPU / CPU",
+    spec: (f16, gpu) => ({ model: "onnx-community/whisper-small", device: gpu ? "webgpu" : "wasm",
+      dtype: gpu ? { encoder_model: "fp32", decoder_model_merged: "q4" } : "q8",
+      opts: { language: "en", task: "transcribe" } }) },
+  "whisper-base": { label: "Whisper base · ~80 MB · fast, weaker on jargon",
+    spec: (f16, gpu) => ({ model: "onnx-community/whisper-base", device: gpu ? "webgpu" : "wasm",
+      dtype: gpu ? { encoder_model: "fp32", decoder_model_merged: "q4" } : "q8",
+      opts: { language: "en", task: "transcribe" } }) },
+  "moonshine": { label: "Moonshine base · ~60 MB · English, very fast",
+    spec: (f16, gpu) => ({ model: "onnx-community/moonshine-base-ONNX", device: gpu ? "webgpu" : "wasm",
+      dtype: gpu ? { encoder_model: "fp32", decoder_model_merged: "q4" } : "q8", opts: {} }) },
+  "parakeet": { label: "Parakeet CTC 0.6B · ~450 MB · experimental, no punctuation", needsGPU: true,
+    spec: f16 => ({ model: "onnx-community/parakeet-ctc-0.6b-ONNX", device: "webgpu", dtype: f16 ? "q4f16" : "q4", opts: {} }) },
+  "webspeech": { label: "Chrome on-device speech (live, Web Speech API)", native: true },
+  "nano-audio": { label: "Chrome Gemini Nano (audio prompt)", native: true },
+};
+const LLM = {
+  "qwen3-1.7b": { label: "Qwen3 1.7B · ~1.4 GB · WebGPU", needsGPU: true,
+    spec: f16 => ({ model: "onnx-community/Qwen3-1.7B-ONNX", device: "webgpu", dtype: f16 ? "q4f16" : "q4" }) },
+  "qwen3-4b": { label: "Qwen3 4B · ~2.8 GB · WebGPU, best quality", needsGPU: true, f16Only: true,
+    spec: () => ({ model: "onnx-community/Qwen3-4B-ONNX", device: "webgpu", dtype: "q4f16" }) },
+  "lfm2-1.2b": { label: "LFM2 1.2B · ~760 MB · WebGPU", needsGPU: true,
+    spec: f16 => ({ model: "onnx-community/LFM2-1.2B-ONNX", device: "webgpu", dtype: f16 ? "q4f16" : "q4" }) },
+  "qwen3.5-0.8b": { label: "Qwen3.5 0.8B · ~470 MB · WebGPU", needsGPU: true,
+    spec: f16 => ({ model: "onnx-community/Qwen3.5-0.8B-Text-ONNX", device: "webgpu", dtype: f16 ? "q4f16" : "q4" }) },
+  "qwen3-0.6b": { label: "Qwen3 0.6B · ~600 MB · runs on CPU, rough",
+    spec: (f16, gpu) => ({ model: "onnx-community/Qwen3-0.6B-ONNX", device: gpu ? "webgpu" : "wasm", dtype: gpu && f16 ? "q4f16" : "q4" }) },
+  "nano": { label: "Chrome Gemini Nano (built in)", native: true },
+  "none": { label: "None (transcript only)", native: true },
+};
+
+// ---------------------------------------------------------------------------
+// DOM helpers & state
+// ---------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const state = { gpu: false, f16: false, nanoText: "unavailable", nanoAudio: "unavailable", wsLocal: "unavailable" };
+const status = (msg) => { $("status").textContent = msg; };
+const banner = (html) => { const d = document.createElement("div"); d.className = "banner"; d.innerHTML = html; $("banners").append(d); };
+const settings = (() => { try { return JSON.parse(localStorage.getItem("dictate.settings") || "{}"); } catch { return {}; } })();
+const saveSettings = () => { try { localStorage.setItem("dictate.settings", JSON.stringify({
+  asr: $("asrSel").value, llm: $("llmSel").value, style: $("styleSel").value, spell: $("spellSel").value,
+  auto: $("autoFmt").checked })); } catch {} };
+
+// ---------------------------------------------------------------------------
+// Capability probe
+// ---------------------------------------------------------------------------
+async function probe() {
+  const cap = [];
+  const add = (k, v, cls) => cap.push(`<dt>${k}</dt><dd class="${cls ?? ""}">${v}</dd>`);
+  add("Secure context", isSecureContext ? "yes" : "no", isSecureContext ? "yes" : "no");
+  try {
+    const adapter = await navigator.gpu?.requestAdapter();
+    if (adapter) {
+      state.gpu = true; state.f16 = adapter.features.has("shader-f16");
+      const info = adapter.info ?? {};
+      add("WebGPU", `${info.vendor || "?"} ${info.architecture || ""} ${info.description || ""}`.trim(), "yes");
+      add("shader-f16", state.f16 ? "yes" : "no (falls back to q4/fp32)", state.f16 ? "yes" : "maybe");
+      add("Max buffer", `${Math.round(adapter.limits.maxBufferSize / 2 ** 20)} MB`);
+    } else add("WebGPU", "no adapter: CPU (WASM) only", "no");
+  } catch (e) { add("WebGPU", "error: " + e.message, "no"); }
+
+  if ("LanguageModel" in self) {
+    const io = (inputs) => ({ expectedInputs: inputs, expectedOutputs: [{ type: "text", languages: ["en"] }] });
+    try { state.nanoText = await LanguageModel.availability(io([{ type: "text", languages: ["en"] }])); } catch (e) { state.nanoText = "error"; }
+    try { state.nanoAudio = await LanguageModel.availability(io([{ type: "audio" }, { type: "text", languages: ["en"] }])); } catch (e) { state.nanoAudio = "error"; }
+  }
+  const nc = (s) => s === "available" ? "yes" : s === "unavailable" || s === "error" ? "no" : "maybe";
+  add("Prompt API (text)", "LanguageModel" in self ? state.nanoText : "not in this browser", nc(state.nanoText));
+  add("Prompt API (audio)", "LanguageModel" in self ? state.nanoAudio : "not in this browser", nc(state.nanoAudio));
+
+  const SR = self.SpeechRecognition || self.webkitSpeechRecognition;
+  if (SR?.available) {
+    try { state.wsLocal = await SR.available({ langs: ["en-GB"], processLocally: true }); }
+    catch { try { state.wsLocal = await SR.available({ langs: ["en-US"], processLocally: true }); } catch { state.wsLocal = "error"; } }
+    add("On-device speech", state.wsLocal, nc(state.wsLocal));
+  } else add("On-device speech", SR ? "cloud only (would send audio to vendor): disabled" : "not in this browser", "no");
+
+  try {
+    const est = await navigator.storage?.estimate();
+    if (est) add("Storage quota", `${(est.usage / 2 ** 30).toFixed(2)} GB used of ${(est.quota / 2 ** 30).toFixed(0)} GB`);
+    const persisted = await navigator.storage?.persisted?.();
+    add("Persistent storage", persisted ? "granted" : "not yet (requested on load)", persisted ? "yes" : "maybe");
+  } catch {}
+  add("CPU threads", navigator.hardwareConcurrency ?? "?");
+  add("cross-origin isolated", self.crossOriginIsolated ? "yes (multithreaded WASM)" : "no (single-threaded WASM)", self.crossOriginIsolated ? "yes" : "maybe");
+  $("cap").innerHTML = cap.join("");
+
+  const pill = $("privacyPill");
+  pill.textContent = "on-device · CSP-locked"; pill.className = "pill ok";
+}
+
+function fillSelects() {
+  const usable = (e) => {
+    if (e.needsGPU && !state.gpu) return false;
+    if (e.f16Only && !state.f16) return false;
+    return true;
+  };
+  const asrOk = { webspeech: ["available", "downloadable", "downloading"].includes(state.wsLocal),
+                  "nano-audio": ["available", "downloadable", "downloading"].includes(state.nanoAudio) };
+  const llmOk = { nano: ["available", "downloadable", "downloading"].includes(state.nanoText), none: true };
+  const fill = (sel, cat, nativeOk, pref) => {
+    sel.innerHTML = "";
+    for (const [k, e] of Object.entries(cat)) {
+      const ok = e.native ? nativeOk[k] : usable(e);
+      const o = new Option(e.label + (ok ? "" : " (unavailable here)"), k);
+      o.disabled = !ok; sel.append(o);
+    }
+    const first = [...sel.options].find(o => !o.disabled);
+    sel.value = pref && !sel.querySelector(`option[value="${pref}"]`)?.disabled ? pref : first?.value;
+  };
+  fill($("asrSel"), ASR, asrOk, settings.asr ?? (state.gpu ? "whisper-turbo" : "whisper-base"));
+  fill($("llmSel"), LLM, llmOk, settings.llm ?? (llmOk.nano ? "nano" : state.gpu ? "qwen3-1.7b" : "qwen3-0.6b"));
+  if (settings.style) $("styleSel").value = settings.style;
+  if (settings.spell) $("spellSel").value = settings.spell;
+  if (settings.auto !== undefined) $("autoFmt").checked = settings.auto;
+}
+
+// ---------------------------------------------------------------------------
+// Worker plumbing
+// ---------------------------------------------------------------------------
+const worker = new Worker(URL.createObjectURL(new Blob([$("worker-src").textContent], { type: "text/javascript" })), { type: "module" });
+const pending = new Map(); let nextId = 1;
+const files = new Map();
+const onToken = new Map();
+worker.onmessage = ({ data }) => {
+  switch (data.type) {
+    case "progress": {
+      files.set(data.file, data);
+      let l = 0, t = 0; for (const f of files.values()) { l += f.loaded || 0; t += f.total || 0; }
+      showProgress(t ? l / t : 0, `Downloading ${data.stage === "asr" ? "transcriber" : "formatter"}: ${(l / 2 ** 20).toFixed(0)} / ${(t / 2 ** 20).toFixed(0)} MB`);
+      break;
+    }
+    case "loaded": settle(data.stage, data); break;
+    case "asr-result": settle(data.id, data); break;
+    case "token": onToken.get(data.id)?.(data.text); break;
+    case "gen-done": settle(data.id, data); break;
+    case "error": {
+      const key = data.id ?? (data.stage === "load-asr" ? "asr" : data.stage === "load-llm" ? "llm" : null);
+      const p = pending.get(key); pending.delete(key);
+      if (p) p.reject(new Error(data.message)); else status("Worker error: " + data.message);
+      break;
+    }
+  }
+};
+worker.onerror = (e) => status("Worker failed to start: " + (e.message || "check console / CSP"));
+function settle(key, val) { const p = pending.get(key); pending.delete(key); p?.resolve(val); }
+function call(msg, key, transfer) {
+  return new Promise((resolve, reject) => { pending.set(key, { resolve, reject }); worker.postMessage(msg, transfer ?? []); });
+}
+function showProgress(frac, msg) {
+  $("prog").style.display = frac >= 0 && frac < 1 ? "block" : "none";
+  $("prog").firstElementChild.style.width = (frac * 100).toFixed(1) + "%";
+  if (msg) status(msg);
+}
+
+// ---------------------------------------------------------------------------
+// Engine loading
+// ---------------------------------------------------------------------------
+const loaded = { asr: null, llm: null };
+let nanoBase = null, nanoAudioBase = null;
+
+function nanoMonitor(what) {
+  return (m) => m.addEventListener("downloadprogress", (e) => showProgress(e.loaded, `Chrome is downloading Gemini Nano (${what}): ${Math.round(e.loaded * 100)}%`));
+}
+
+async function ensureASR() {
+  const k = $("asrSel").value;
+  if (loaded.asr === k) return;
+  const e = ASR[k];
+  if (k === "nano-audio") {
+    nanoAudioBase = await LanguageModel.create({
+      expectedInputs: [{ type: "audio" }, { type: "text", languages: ["en"] }],
+      expectedOutputs: [{ type: "text", languages: ["en"] }],
+      initialPrompts: [{ role: "system", content: "You are a medical transcriptionist. Transcribe the clinician's dictation verbatim, including drug names, doses and spoken punctuation commands. Output only the transcript text, no commentary." }],
+      monitor: nanoMonitor("audio"),
+    });
+  } else if (k === "webspeech") {
+    const SR = self.SpeechRecognition || self.webkitSpeechRecognition;
+    const lang = $("spellSel").value === "British" ? "en-GB" : "en-US";
+    status("Installing on-device speech pack…");
+    const ok = await SR.install({ langs: [lang], processLocally: true });
+    if (!ok) throw new Error("Chrome refused to install the on-device speech pack for " + lang);
+  } else {
+    files.clear();
+    status("Loading transcriber…");
+    await call({ type: "load-asr", spec: e.spec(state.f16, state.gpu) }, "asr");
+  }
+  loaded.asr = k;
+}
+
+async function ensureLLM() {
+  const k = $("llmSel").value;
+  if (loaded.llm === k) return;
+  if (k === "nano") {
+    nanoBase = await LanguageModel.create({
+      expectedInputs: [{ type: "text", languages: ["en"] }],
+      expectedOutputs: [{ type: "text", languages: ["en"] }],
+      monitor: nanoMonitor("text"),
+    });
+  } else if (k !== "none") {
+    files.clear();
+    status("Loading formatter…");
+    await call({ type: "load-llm", spec: LLM[k].spec(state.f16, state.gpu) }, "llm");
+  }
+  loaded.llm = k;
+}
+
+$("loadBtn").onclick = async () => {
+  saveSettings();
+  $("loadBtn").disabled = true;
+  try {
+    navigator.storage?.persist?.();
+    const t0 = performance.now();
+    await ensureASR();
+    await ensureLLM();
+    showProgress(1);
+    status(`Ready (${((performance.now() - t0) / 1000).toFixed(1)} s). Press record.`);
+  } catch (e) { showProgress(1); status("Load failed: " + e.message); console.error(e); }
+  finally { $("loadBtn").disabled = false; }
+};
+
+// ---------------------------------------------------------------------------
+// Audio: capture → 16 kHz mono → silence-aware chunks → transcriber queue
+// ---------------------------------------------------------------------------
+const SR16 = 16000;
+const CHUNK_MIN = 8 * SR16, CHUNK_MAX = 25 * SR16, FRAME = 480; // 30 ms frames
+
+/** Find a split point in [from, to): the centre of the quietest ~300 ms window. */
+function quietestPoint(buf, from, to) {
+  const win = 10; // frames
+  const energies = [];
+  for (let i = from; i + FRAME <= to; i += FRAME) {
+    let s = 0; for (let j = i; j < i + FRAME; j++) s += buf[j] * buf[j];
+    energies.push(s / FRAME);
+  }
+  let best = -1, bestE = Infinity, run = 0;
+  for (let i = 0; i < energies.length; i++) {
+    run += energies[i]; if (i >= win) run -= energies[i - win];
+    if (i >= win - 1 && run < bestE) { bestE = run; best = i - Math.floor(win / 2); }
+  }
+  return best < 0 ? to : from + best * FRAME;
+}
+const rms = (a) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i]; return Math.sqrt(s / Math.max(1, a.length)); };
+
+function downsample(input, fromRate) {
+  if (fromRate === SR16) return input;
+  const ratio = fromRate / SR16, out = new Float32Array(Math.floor(input.length / ratio));
+  for (let i = 0; i < out.length; i++) {
+    const start = Math.floor(i * ratio), end = Math.min(input.length, Math.floor((i + 1) * ratio));
+    let s = 0; for (let j = start; j < end; j++) s += input[j];
+    out[i] = s / Math.max(1, end - start); // box filter: cheap anti-aliasing
+  }
+  return out;
+}
+
+class Chunker {
+  constructor(onChunk) { this.onChunk = onChunk; this.buf = new Float32Array(SR16 * 60); this.len = 0; }
+  push(samples) {
+    if (this.len + samples.length > this.buf.length) {
+      const b = new Float32Array(Math.max(this.buf.length * 2, this.len + samples.length)); b.set(this.buf.subarray(0, this.len)); this.buf = b;
+    }
+    this.buf.set(samples, this.len); this.len += samples.length;
+    while (this.len >= CHUNK_MAX) this.cut(quietestPoint(this.buf, CHUNK_MIN, CHUNK_MAX));
+    // Early cut on a clear pause, so text appears while still dictating.
+    if (this.len >= CHUNK_MIN + SR16) {
+      const tail = this.buf.subarray(this.len - SR16 * 0.6, this.len);
+      if (rms(tail) < 0.008) this.cut(this.len - SR16 * 0.3);
+    }
+  }
+  cut(at) {
+    const chunk = this.buf.slice(0, at);
+    this.buf.copyWithin(0, at, this.len); this.len -= at;
+    this.onChunk(chunk);
+  }
+  flush() { if (this.len > SR16 * 0.3) this.cut(this.len); else this.len = 0; }
+}
+
+// Ordered transcription queue so text lands in sequence even if engines are async.
+let queue = Promise.resolve(), inFlight = 0;
+function enqueueChunk(audio) {
+  if (rms(audio) < 0.004) return; // skip silence: Whisper hallucinates on it ("Thank you.")
+  inFlight++; updateBusy();
+  queue = queue.then(() => transcribeChunk(audio)).then((text) => appendTranscript(text))
+    .catch((e) => status("Transcription error: " + e.message))
+    .finally(() => { inFlight--; updateBusy(); });
+}
+async function transcribeChunk(audio) {
+  const k = loaded.asr;
+  if (k === "nano-audio") {
+    const ctx = new OfflineAudioContext(1, audio.length, SR16);
+    const ab = ctx.createBuffer(1, audio.length, SR16); ab.copyToChannel(audio, 0);
+    const s = await nanoAudioBase.clone();
+    try {
+      return (await s.prompt([{ role: "user", content: [
+        { type: "text", value: "Transcribe this audio." }, { type: "audio", value: ab }] }])).trim();
+    } finally { s.destroy(); }
+  }
+  const r = await call({ type: "transcribe", id: nextId, audio, opts: ASR[k].spec(state.f16, state.gpu).opts }, nextId++, [audio.buffer]);
+  status(`Transcribed ${r.secs.toFixed(1)} s of audio in ${(r.ms / 1000).toFixed(1)} s (${(r.secs / (r.ms / 1000)).toFixed(1)}× real time)`);
+  return r.text;
+}
+const HALLUCINATIONS = /^(thank you\.?|thanks for watching!?|you|\.|\[blank_audio\]|\(.*?\))$/i;
+function appendTranscript(text) {
+  if (!text || HALLUCINATIONS.test(text.trim())) return;
+  const t = $("transcript");
+  t.value = (t.value.trimEnd() + " " + text.trim()).trim();
+  t.scrollTop = t.scrollHeight;
+}
+function updateBusy() { if (inFlight > 0) status(`Transcribing… (${inFlight} chunk${inFlight > 1 ? "s" : ""} queued)`); }
+
+// --- Recording -------------------------------------------------------------
+let rec = null;
+async function startRecording() {
+  if (!loaded.asr || loaded.asr !== $("asrSel").value) await $("loadBtn").onclick();
+  if (!loaded.asr) return;
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
+  const ctx = new AudioContext();
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([$("worklet-src").textContent], { type: "text/javascript" })));
+  const src = ctx.createMediaStreamSource(stream);
+  const tap = new AudioWorkletNode(ctx, "tap");
+  const native = loaded.asr === "webspeech";
+  const chunker = native ? null : new Chunker(enqueueChunk);
+  let level = 0;
+  tap.port.onmessage = ({ data }) => {
+    level = Math.max(level * 0.85, rms(data) * 6);
+    chunker?.push(downsample(data, ctx.sampleRate));
+  };
+  src.connect(tap);
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    $("timer").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    $("meter").firstElementChild.style.width = Math.min(100, level * 100) + "%";
+  }, 80);
+  let speech = null;
+  if (native) speech = startWebSpeech();
+  rec = { stream, ctx, chunker, tick, speech };
+  $("recbtn").classList.add("on"); $("recbtn").title = "Stop";
+  status(native ? "Listening (on-device)…" : "Recording… text appears at each pause.");
+}
+async function stopRecording() {
+  const r = rec; rec = null;
+  $("recbtn").classList.remove("on"); $("recbtn").title = "Record";
+  clearInterval(r.tick); $("meter").firstElementChild.style.width = "0";
+  r.stream.getTracks().forEach(t => t.stop());
+  await r.ctx.close();
+  if (r.speech) await r.speech.stop();
+  r.chunker?.flush();
+  await queue;
+  status("Transcription complete.");
+  if ($("autoFmt").checked && $("transcript").value.trim()) formatNote();
+}
+$("recbtn").onclick = async () => {
+  try { rec ? await stopRecording() : await startRecording(); }
+  catch (e) { status("Recording error: " + e.message); console.error(e); }
+};
+
+// --- Web Speech (on-device only) --------------------------------------------
+function startWebSpeech() {
+  const SR = self.SpeechRecognition || self.webkitSpeechRecognition;
+  const r = new SR();
+  r.lang = $("spellSel").value === "British" ? "en-GB" : "en-US";
+  r.processLocally = true; // hard requirement: never fall back to cloud recognition
+  if (r.processLocally !== true) throw new Error("This browser cannot guarantee on-device recognition");
+  r.continuous = true; r.interimResults = true;
+  let stopping = false, done;
+  const finished = new Promise((res) => (done = res));
+  r.onresult = (ev) => {
+    let interim = "";
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const res = ev.results[i];
+      if (res.isFinal) appendTranscript(res[0].transcript); else interim += res[0].transcript;
+    }
+    $("interim").textContent = interim;
+  };
+  r.onerror = (e) => { if (e.error !== "no-speech" && e.error !== "aborted") status("Speech error: " + e.error); };
+  r.onend = () => { if (!stopping) { try { r.start(); } catch {} } else { $("interim").textContent = ""; done(); } };
+  r.start();
+  return { stop: () => { stopping = true; r.stop(); return finished; } };
+}
+
+// --- File upload -----------------------------------------------------------
+$("fileIn").onchange = async () => {
+  const f = $("fileIn").files[0]; if (!f) return;
+  try {
+    if (loaded.asr === "webspeech" || $("asrSel").value === "webspeech") throw new Error("Web Speech only works with a live microphone; pick another transcriber for files");
+    if (!loaded.asr || loaded.asr !== $("asrSel").value) await $("loadBtn").onclick();
+    status("Decoding audio file…");
+    const ctx = new OfflineAudioContext(1, 1, SR16);
+    const decoded = await ctx.decodeAudioData(await f.arrayBuffer());
+    // Mix to mono then resample with OfflineAudioContext (proper filter) to 16 kHz.
+    const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * SR16), SR16);
+    const node = off.createBufferSource(); node.buffer = decoded; node.connect(off.destination); node.start();
+    const pcm = (await off.startRendering()).getChannelData(0);
+    status(`Audio: ${decoded.duration.toFixed(1)} s. Transcribing…`);
+    const ch = new Chunker(enqueueChunk);
+    for (let i = 0; i < pcm.length; i += SR16) ch.push(pcm.slice(i, i + SR16));
+    ch.flush();
+    await queue;
+    status("Transcription complete.");
+    if ($("autoFmt").checked && $("transcript").value.trim()) formatNote();
+  } catch (e) { status("File error: " + e.message); console.error(e); }
+  finally { $("fileIn").value = ""; }
+};
+
+// ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
+const STYLES = {
+  prose: "Rewrite it as clear, formal clinical prose in well-structured paragraphs, in the clinician's voice (first person where they dictated it).",
+  soap: "Organise it as a SOAP note with the headings Subjective, Objective, Assessment and Plan. Put each dictated item under the most appropriate heading. If nothing was dictated for a heading, write 'Not documented.' under it.",
+  letter: "Write it as a clinic letter to the referring clinician. Start with 'Dear Dr …,' unless a name was dictated, then use the dictated content in formal paragraphs, and end with 'Yours sincerely,' and the clinician's name only if it was dictated.",
+  bullets: "Write a concise problem-based summary: one heading per problem, with short bullet points for findings, actions and follow-up.",
+};
+function systemPrompt() {
+  const vocab = $("vocab").value.trim();
+  return [
+    "You are a clinical documentation assistant. You receive the raw speech-recognition transcript of a clinician's dictation.",
+    STYLES[$("styleSel").value],
+    `Use ${$("spellSel").value} spelling and standard medical abbreviations only where the clinician used them.`,
+    "Strict rules:",
+    "1. Use only information in the transcript. Never add findings, diagnoses, history, doses, values, dates or recommendations that were not dictated.",
+    "2. Copy every number, dose, unit, frequency, laterality (left/right), and negation (no, denies, not, without) exactly as dictated.",
+    "3. Apply spoken dictation commands such as 'full stop', 'comma', 'new paragraph', 'new line', 'open bracket', and 'scratch that' or 'delete that' (remove the preceding phrase). Remove fillers (um, er) and false starts.",
+    "4. Fix an obvious speech-recognition error in a medical term only when the intended term is unambiguous from context. If you are unsure, keep the original words and put [?] after them.",
+    vocab ? `5. Terms the clinician is likely to use, with correct spelling: ${vocab}.` : "",
+    "Output only the note. No preamble, no explanation.",
+  ].filter(Boolean).join("\n");
+}
+
+let genAbort = null;
+async function formatNote() {
+  const transcript = $("transcript").value.trim();
+  if (!transcript) { status("Nothing to format."); return; }
+  const note = $("note"); note.textContent = ""; $("checks").hidden = true;
+  $("fmtBtn").disabled = true; $("stopGen").disabled = false;
+  let text = "";
+  const write = (t) => { text = t; note.textContent = text.replace(/<think>[\s\S]*?<\/think>\s*/g, ""); };
+  const t0 = performance.now();
+  try {
+    await ensureLLM();
+    const k = loaded.llm;
+    if (k === "none") { write(transcript); }
+    else if (k === "nano") {
+      const s = await nanoBase.clone();
+      genAbort = new AbortController();
+      try {
+        const stream = s.promptStreaming([{ role: "system", content: systemPrompt() }, { role: "user", content: "Transcript:\n" + transcript }], { signal: genAbort.signal });
+        for await (const chunk of stream) write(chunk.startsWith(text) && text ? chunk : text + chunk);
+      } finally { s.destroy(); }
+    } else {
+      const id = nextId++;
+      onToken.set(id, (t) => write(text + t));
+      genAbort = { abort: () => worker.postMessage({ type: "abort" }) };
+      status("Writing note…");
+      const r = await call({ type: "generate", id, messages: [
+        { role: "system", content: systemPrompt() }, { role: "user", content: "Transcript:\n" + transcript }] }, id);
+      onToken.delete(id);
+      status(`Note written in ${(r.ms / 1000).toFixed(1)} s.`);
+    }
+    if (k === "nano" || k === "none") status(`Note written in ${((performance.now() - t0) / 1000).toFixed(1)} s.`);
+  } catch (e) {
+    if (e.name !== "AbortError") { status("Formatting error: " + e.message); console.error(e); }
+  } finally {
+    genAbort = null; $("fmtBtn").disabled = false; $("stopGen").disabled = true;
+    write(text.replace(/<think>[\s\S]*?<\/think>\s*/g, "").trim());
+    verify();
+  }
+}
+$("fmtBtn").onclick = () => { saveSettings(); formatNote(); };
+$("stopGen").onclick = () => genAbort?.abort();
+
+// ---------------------------------------------------------------------------
+// Safety checks: numbers & laterality must survive formatting unchanged
+// ---------------------------------------------------------------------------
+const UNITS = { zero: 0, oh: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+const ORD = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10 };
+
+/** Turn spoken numbers ("one hundred and twenty five", "two point five") into digits. */
+function wordsToDigits(text) {
+  const toks = text.split(/(\s+|-)/);
+  const out = []; let cur = null, total = 0, dec = null;
+  const flush = () => {
+    if (cur === null && total === 0 && dec === null) return;
+    let n = total + (cur ?? 0);
+    if (dec !== null) n = `${n}.${dec}`;
+    out.push(String(n), " "); cur = null; total = 0; dec = null;
+  };
+  for (let i = 0; i < toks.length; i++) {
+    const raw = toks[i], w = raw.toLowerCase().replace(/[.,;:]$/, "");
+    const punct = raw.match(/[.,;:]$/)?.[0] ?? "";
+    if (/^(\s+|-)$/.test(raw)) { if (cur === null && total === 0) out.push(raw); continue; }
+    if (dec !== null && w in UNITS) { dec += UNITS[w]; if (punct) { flush(); out.push(punct); } continue; }
+    if (w in UNITS || w in TENS) {
+      const v = UNITS[w] ?? TENS[w];
+      cur = (cur ?? 0) + v; if (punct) { flush(); out.push(punct); } continue;
+    }
+    if (w === "hundred" && (cur !== null)) { cur *= 100; continue; }
+    if (w === "thousand" && (cur !== null || total)) { total = (total + (cur ?? 0)) * 1000; cur = null; continue; }
+    if (w === "and" && (cur !== null || total) && /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)/i.test(toks[i + 2] ?? "")) continue;
+    if (w === "point" && (cur !== null || total)) { dec = ""; continue; }
+    flush();
+    if (w in ORD) { out.push(String(ORD[w]), punct); continue; }
+    out.push(raw);
+  }
+  flush();
+  return out.join("");
+}
+function numbers(text) {
+  const t = wordsToDigits(text).replace(/(\d),(\d{3})/g, "$1$2");
+  const m = t.match(/\d+(?:\.\d+)?/g) ?? [];
+  const bag = new Map(); for (const n of m) { const k = String(parseFloat(n)); bag.set(k, (bag.get(k) ?? 0) + 1); }
+  return bag;
+}
+const count = (text, re) => (text.match(re) ?? []).length;
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function verify() {
+  const src = $("transcript").value, out = $("note").innerText;
+  if (!out.trim()) return;
+  const a = numbers(src), b = numbers(out);
+  const added = [...b.keys()].filter(k => !a.has(k));
+  const dropped = [...a.keys()].filter(k => !b.has(k));
+  const issues = [];
+  if (added.length) issues.push(`<li><b>Numbers not in the transcript:</b> ${added.map(esc).join(", ")} (highlighted)</li>`);
+  if (dropped.length) issues.push(`<li><b>Dictated numbers missing from the note:</b> ${dropped.map(esc).join(", ")}</li>`);
+  for (const side of ["left", "right", "bilateral"]) {
+    const re = new RegExp(`\\b${side}\\b`, "gi"), x = count(src, re), y = count(out, re);
+    if (x !== y) issues.push(`<li><b>Laterality:</b> “${side}” appears ${x}× dictated, ${y}× in note</li>`);
+  }
+  const neg = /\b(no|not|denies|denied|without|negative|nil|absent)\b/gi;
+  const nx = count(src, neg), ny = count(out, neg);
+  if (ny < nx) issues.push(`<li><b>Negations:</b> ${nx} dictated, ${ny} in note. Check nothing negative became positive.</li>`);
+  // Highlight introduced numbers in the note.
+  if (added.length) {
+    const set = new Set(added);
+    $("note").innerHTML = esc(out).replace(/\d[\d,]*(?:\.\d+)?/g, (m) => set.has(String(parseFloat(m.replace(/,/g, "")))) ? `<mark title="Not found in transcript">${m}</mark>` : m);
+  }
+  const box = $("checks"); box.hidden = false;
+  box.innerHTML = issues.length
+    ? `<div class="no">⚠ ${issues.length} thing${issues.length > 1 ? "s" : ""} to check</div><ul style="margin:4px 0 0;padding-left:18px">${issues.join("")}</ul>`
+    : `<div class="yes">✓ Numbers, laterality and negations match the transcript. Still read it before use.</div>`;
+}
+$("recheck").onclick = verify;
+$("copyBtn").onclick = async () => { await navigator.clipboard.writeText($("note").innerText); status("Note copied."); };
+$("clearBtn").onclick = () => { $("transcript").value = ""; $("note").textContent = ""; $("checks").hidden = true; $("interim").textContent = ""; status(""); };
+
+for (const id of ["asrSel", "llmSel", "styleSel", "spellSel", "autoFmt"]) $(id).addEventListener("change", saveSettings);
+
+// ---------------------------------------------------------------------------
+if (location.protocol === "file:") banner("Opened as a file: models can't be cached and the microphone may be blocked. Serve the folder instead, e.g. <code>python3 -m http.server 8000</code>, then open <code>http://localhost:8000</code>.");
+await probe();
+fillSelects();
+if (!state.gpu) banner("No WebGPU adapter. CPU-only engines are available but slow. In Chrome on Linux, enable <code>chrome://flags/#enable-unsafe-webgpu</code> and <code>chrome://flags/#enable-vulkan</code>, then relaunch.");
+status("Pick engines, then Load (first run downloads the models; later runs load from cache).");
+window.__dictate = { verify, wordsToDigits, numbers, formatNote, state, loaded }; // for testing
+</script>
+</body>
+</html>

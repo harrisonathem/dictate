@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Privacy guard: code only from jsDelivr, weights only from Hugging Face. Audio and text cannot leave the page. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net; worker-src 'self' blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>Dictate</title>
+<style>
+:root { --bg:#f6f5f2; --panel:#fff; --ink:#1d1f22; --muted:#6a6f76; --line:#e2e0da; --accent:#1f6f5c; --accent-ink:#fff;
+  --warn-bg:#fff3c4; --warn-ink:#7a5600; --bad:#b3261e; --ok:#1f6f5c; --rec:#c62828; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+@media (prefers-color-scheme: dark) { :root { --bg:#15171a; --panel:#1d2024; --ink:#e8e6e1; --muted:#9aa0a6; --line:#30343a;
+  --accent:#4fb39a; --accent-ink:#0d1412; --warn-bg:#4a3b0a; --warn-ink:#ffe08a; --bad:#ff8a80; --ok:#6fd1b6; --rec:#ff5252; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 28px 16px 60px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+.sub a { color: var(--accent); }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-top:16px; }
+.card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin:0 0 8px; font-weight:600; display:flex; gap:8px; align-items:center; }
+.card h2 span { flex:1; }
+
+/* loading checklist */
+#loader { margin-top: 0; }
+#loader h2 b { font-family: var(--mono); font-weight: 500; letter-spacing: 0; text-transform: none; }
+.step { display:grid; grid-template-columns: 20px 1fr auto; gap: 2px 10px; align-items:center; padding: 6px 0; font-size: 14px; }
+.step + .step { border-top: 1px solid var(--line); }
+.step .ic { width:14px; height:14px; border-radius:50%; border:2px solid var(--line); }
+.step.run .ic { border-color: var(--accent); border-right-color: transparent; animation: spin .8s linear infinite; }
+.step.done .ic { border:none; background: var(--ok); mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M6.2 11.4 2.8 8l-1.1 1.1 4.5 4.5 8.6-8.6-1.1-1.1z"/></svg>') center/contain no-repeat; border-radius:0; }
+.step.fail .ic { border-color: var(--bad); background: var(--bad); }
+.step.wait { color: var(--muted); }
+.step .detail { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
+.step .bar { grid-column: 2 / 4; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; display: none; }
+.step.run .bar.on { display: block; }
+.step .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.dock { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+#rec { width:72px; height:72px; border-radius:50%; border:3px solid var(--rec); background:var(--panel); position:relative; cursor:pointer; flex:none; }
+#rec::after { content:""; position:absolute; inset:15px; border-radius:50%; background:var(--rec); transition:all .15s; }
+#rec.on::after { inset:22px; border-radius:5px; }
+#rec:disabled { opacity:.3; cursor:wait; }
+#timer { font-family:var(--mono); font-size:22px; min-width:64px; }
+#meter { flex:1; min-width:80px; height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
+#meter > div { height:100%; width:0; background:var(--accent); transition:width .08s; }
+select, button { font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 10px; cursor:pointer; }
+#status { font-size:13px; color:var(--muted); margin:10px 2px 0; min-height:1.4em; }
+#note { white-space:pre-wrap; outline:none; min-height:120px; }
+#note:empty::before { content:"The formatted note appears here."; color:var(--muted); }
+#transcript { width:100%; min-height:90px; border:none; background:transparent; color:var(--ink); font:inherit; font-size:14px; resize:vertical; outline:none; padding:0; }
+mark { background:var(--warn-bg); color:var(--warn-ink); border-radius:3px; padding:0 2px; }
+#checks { font-size:13px; margin-top:12px; padding-top:8px; border-top:1px solid var(--line); }
+#checks ul { margin:4px 0 0; padding-left:18px; }
+.ok { color:var(--ok); } .bad { color:var(--bad); }
+#timings { font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:18px; line-height:1.8; }
+.banner { background:var(--warn-bg); color:var(--warn-ink); padding:10px 14px; border-radius:8px; margin-bottom:16px; font-size:14px; }
+.small { font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Dictate</h1>
+  <div class="sub">Speak a clinical note. Transcription and formatting run on this device; nothing is uploaded or stored.<br><span id="edition"></span></div>
+  <div id="banners"></div>
+
+  <section class="card" id="loader">
+    <h2><span>Getting ready</span><b id="elapsed">0.0 s</b></h2>
+    <div id="steps"></div>
+  </section>
+
+  <section class="card">
+    <div class="dock">
+      <button id="rec" aria-label="Record" title="Waiting for the transcriber to load" disabled></button>
+      <span id="timer">0:00</span>
+      <div id="meter"><div></div></div>
+      <select id="style" aria-label="Note style">
+        <option value="prose">Formal prose</option>
+        <option value="soap">SOAP</option>
+        <option value="letter">Letter to GP</option>
+      </select>
+    </div>
+    <div id="status">Loading…</div>
+  </section>
+
+  <section class="card">
+    <h2><span>Note · draft, check before use</span><button id="redo" class="small">Rewrite</button><button id="copy" class="small">Copy</button></h2>
+    <div id="note" contenteditable="plaintext-only"></div>
+    <div id="checks" hidden></div>
+  </section>
+
+  <section class="card">
+    <h2><span>Transcript · editable</span></h2>
+    <textarea id="transcript" spellcheck="false" placeholder="What you said appears here as you pause."></textarea>
+  </section>
+
+  <div id="timings"></div>
+</main>
+
+<script type="text/plain" id="worker-src">
+const T0 = performance.now();
+// Handler is attached synchronously below; messages wait on this promise rather than getting lost during the import.
+const lib = import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/dist/transformers.min.js").then((m) => {
+  m.env.allowLocalModels = false;
+  postMessage({ type: "step", step: "runtime", state: "done", ms: performance.now() - T0 });
+  return m;
+});
+
+let asr, tok, llm, asrOpts = {};
+const progress = (step) => (p) => {
+  if (p.status === "progress") postMessage({ type: "progress", step, file: p.file, loaded: p.loaded, total: p.total });
+};
+const done = (step, t0, extra) => postMessage({ type: "step", step, state: "done", ms: performance.now() - t0, ...extra });
+
+self.onmessage = async ({ data }) => {
+  try {
+    const { pipeline, AutoTokenizer, AutoModelForCausalLM, TextStreamer } = await lib;
+    if (data.type === "load-asr") {
+      let t0 = performance.now();
+      postMessage({ type: "step", step: "asr", state: "run" });
+      asr = await pipeline("automatic-speech-recognition", data.model, { device: "webgpu", dtype: data.dtype, progress_callback: progress("asr") });
+      asrOpts = data.opts ?? {};
+      done("asr", t0);
+      t0 = performance.now();
+      postMessage({ type: "step", step: "asr-warm", state: "run" });
+      await asr(new Float32Array(16000), asrOpts);
+      done("asr-warm", t0);
+    } else if (data.type === "load-llm") {
+      let t0 = performance.now();
+      postMessage({ type: "step", step: "llm", state: "run" });
+      tok = await AutoTokenizer.from_pretrained(data.model, { progress_callback: progress("llm") });
+      llm = await AutoModelForCausalLM.from_pretrained(data.model, { device: "webgpu", dtype: data.dtype, progress_callback: progress("llm") });
+      done("llm", t0);
+      t0 = performance.now();
+      postMessage({ type: "step", step: "llm-warm", state: "run" });
+      await llm.generate({ ...tok.apply_chat_template([{ role: "user", content: "Hi" }], { add_generation_prompt: true, return_dict: true }), max_new_tokens: 2 });
+      done("llm-warm", t0);
+    } else if (data.type === "transcribe") {
+      const t0 = performance.now();
+      const out = await asr(data.audio, asrOpts);
+      postMessage({ type: "text", id: data.id, text: out.text.trim(), ms: performance.now() - t0, secs: data.audio.length / 16000 });
+    } else if (data.type === "generate") {
+      const inputs = tok.apply_chat_template(data.messages, { add_generation_prompt: true, return_dict: true, enable_thinking: false });
+      const t0 = performance.now(); let first = 0, n = 0;
+      const streamer = new TextStreamer(tok, { skip_prompt: true, skip_special_tokens: true,
+        token_callback_function: () => { n++; first ||= performance.now(); },
+        callback_function: (text) => postMessage({ type: "token", id: data.id, text }) });
+      await llm.generate({ ...inputs, max_new_tokens: 1200, do_sample: false, repetition_penalty: 1.05, streamer });
+      const end = performance.now();
+      postMessage({ type: "done", id: data.id, ttftMs: first - t0, tps: n / ((end - first) / 1000), tokens: n, promptTokens: inputs.input_ids.dims[1] });
+    }
+  } catch (e) {
+    const step = { "load-asr": "asr", "load-llm": "llm" }[data.type];
+    postMessage({ type: "error", id: data.id, step, message: String(e?.message ?? e) });
+  }
+};
+postMessage({ type: "boot" });
+</script>
+
+<script type="text/plain" id="worklet-src">
+registerProcessor("tap", class extends AudioWorkletProcessor {
+  process(inputs) { const c = inputs[0]?.[0]; if (c) this.port.postMessage(c.slice(0)); return true; }
+});
+</script>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const status = (s) => { $("status").textContent = s; };
+const timings = {};
+const showTimings = () => { $("timings").innerHTML = Object.entries(timings).map(([k, v]) => `${k}: ${v}`).join("<br>"); };
+const fmtS = (ms) => (ms / 1000).toFixed(1) + " s";
+const MB = (b) => (b / 2 ** 20).toFixed(0);
+
+// ---------- which models: standard (default) or ?pro ----------
+const PRO = new URLSearchParams(location.search).has("pro");
+const CONFIG = PRO ? {
+  asr: { id: "onnx-community/whisper-large-v3-turbo", label: "Whisper large-v3-turbo (~560 MB)",
+    dtype: (f16) => f16 ? { encoder_model: "q4f16", decoder_model_merged: "q4f16" } : { encoder_model: "q4", decoder_model_merged: "q4" },
+    opts: { language: "en", task: "transcribe" } },
+  llm: { id: "onnx-community/Qwen3.5-2B-ONNX", label: "Qwen3.5 2B (~1.4 GB)", dtype: (f16) => f16 ? "q4f16" : "q4" },
+} : {
+  // q4 not q4f16: the q4f16/fp16 Moonshine exports have an If-subgraph that current onnxruntime rejects.
+  asr: { id: "onnx-community/moonshine-base-ONNX", label: "Moonshine base (~100 MB)", dtype: () => "q4", opts: {} },
+  llm: { id: "onnx-community/Qwen3.5-0.8B-Text-ONNX", label: "Qwen3.5 0.8B (~470 MB)", dtype: (f16) => f16 ? "q4f16" : "q4" },
+};
+document.title = PRO ? "Dictate Pro" : "Dictate";
+$("edition").innerHTML = PRO
+  ? `<b>Pro</b> · larger, more accurate models (~2 GB first download) · <a href="./">switch to Standard</a>`
+  : `<b>Standard</b> · small, fast models (~0.6 GB first download) · <a href="./?pro">try Pro</a>`;
+
+// ---------- loading checklist ----------
+const STEPS = [
+  ["gpu", "Check this device's GPU (WebGPU)"],
+  ["runtime", "Load the AI runtime (transformers.js, ~2 MB)"],
+  ["asr", "Transcriber: " + CONFIG.asr.label],
+  ["asr-warm", "Prepare transcriber on the GPU"],
+  ["llm", "Note writer: " + CONFIG.llm.label],
+  ["llm-warm", "Prepare note writer on the GPU"],
+];
+$("steps").innerHTML = STEPS.map(([k, label]) =>
+  `<div class="step wait" id="s-${k}"><span class="ic"></span><span>${label}</span><span class="detail"></span><div class="bar"><div></div></div></div>`).join("");
+const loadStart = performance.now();
+const stepStart = {};
+const elapsedTimer = setInterval(() => {
+  $("elapsed").textContent = fmtS(performance.now() - loadStart);
+  // Keep a live clock on running steps that have no byte progress (GPU warm-up, runtime fetch).
+  for (const [k] of STEPS) {
+    const el = $("s-" + k);
+    if (el.classList.contains("run") && !el.querySelector(".bar").classList.contains("on"))
+      el.querySelector(".detail").textContent = fmtS(performance.now() - stepStart[k]);
+  }
+}, 100);
+function setStep(k, state, detail) {
+  const el = $("s-" + k);
+  if (state === "run" && el.classList.contains("done")) return; // a late "started" must not undo "finished"
+  el.className = "step " + state;
+  if (state === "run") stepStart[k] ??= performance.now();
+  if (detail !== undefined) el.querySelector(".detail").textContent = detail;
+}
+
+// ---------- worker ----------
+const worker = new Worker(URL.createObjectURL(new Blob([$("worker-src").textContent], { type: "text/javascript" })), { type: "module" });
+const waiting = new Map(); const streams = new Map(); let nextId = 1;
+const bytes = { asr: new Map(), llm: new Map() };
+const ready = {}, isReady = {};
+const whenReady = (k) => (ready[k] ??= (() => { let res, rej; const p = new Promise((a, b) => { res = a; rej = b; }); p.resolve = res; p.reject = rej; return p; })());
+const call = (msg, transfer) => new Promise((resolve, reject) => { const id = nextId++; waiting.set(id, { resolve, reject }); worker.postMessage({ ...msg, id }, transfer ?? []); });
+
+worker.onerror = (e) => { setStep("runtime", "fail", "failed"); status("Couldn't start the AI runtime: " + (e.message || "network blocked?")); };
+worker.onmessage = ({ data: d }) => {
+  if (d.type === "step") {
+    if (d.state === "run") setStep(d.step, "run");
+    else {
+      let detail = fmtS(d.ms);
+      if (d.step === "asr" || d.step === "llm") {
+        let t = 0; for (const f of bytes[d.step].values()) t += f.total || 0;
+        detail = `${MB(t)} MB ${wasCached[d.step] ? "from cache" : "downloaded"} · ${fmtS(d.ms)}`;
+        timings[d.step === "asr" ? "Transcriber load" : "Note writer load"] = detail;
+      }
+      setStep(d.step, "done", detail);
+      if (d.step === "asr-warm") { isReady.asr = true; whenReady("asr").resolve(); }
+      if (d.step === "llm-warm") { isReady.llm = true; whenReady("llm").resolve(); }
+    }
+  } else if (d.type === "progress") {
+    bytes[d.step].set(d.file, d);
+    let l = 0, t = 0; for (const f of bytes[d.step].values()) { l += f.loaded || 0; t += f.total || 0; }
+    const el = $("s-" + d.step), bar = el.querySelector(".bar");
+    bar.classList.add("on"); bar.firstElementChild.style.width = (100 * l / Math.max(1, t)).toFixed(1) + "%";
+    const secs = (performance.now() - stepStart[d.step]) / 1000;
+    el.querySelector(".detail").textContent = `${MB(l)} / ${MB(t)} MB · ${(l / 2 ** 20 / Math.max(secs, .1)).toFixed(1)} MB/s`;
+  } else if (d.type === "token") streams.get(d.id)?.(d.text);
+  else if (d.type === "error" && d.step) {
+    setStep(d.step, "fail", "failed");
+    whenReady(d.step).reject(new Error(d.message));
+    status(`Loading failed: ${d.message}`);
+  } else if (d.type === "boot") {
+    // worker module finished evaluating
+  } else { const w = waiting.get(d.id); waiting.delete(d.id); d.type === "error" ? w?.reject(new Error(d.message)) : w?.resolve(d); }
+};
+
+// Was a model already in the browser cache before this visit? (transformers.js stores files in "transformers-cache")
+const MODEL_IDS = { asr: CONFIG.asr.id, llm: CONFIG.llm.id };
+const wasCached = {};
+async function inCache(id) {
+  try { return (await (await caches.open("transformers-cache")).keys()).some((r) => r.url.includes(id) && /\.onnx(_data(_\d+)?)?$/.test(r.url)); }
+  catch { return false; }
+}
+
+// ---------- load sequence: transcriber first, so you can dictate while the note writer downloads ----------
+async function load() {
+  setStep("gpu", "run");
+  const adapter = await navigator.gpu?.requestAdapter();
+  if (!adapter) {
+    setStep("gpu", "fail", "not available");
+    $("banners").innerHTML = `<div class="banner">This needs WebGPU (Chrome or Edge on a machine with a GPU). On Linux, enable <code>chrome://flags/#enable-unsafe-webgpu</code> and <code>chrome://flags/#enable-vulkan</code>, then relaunch.</div>`;
+    status("WebGPU unavailable, so the models can't run here.");
+    clearInterval(elapsedTimer); return;
+  }
+  const f16 = adapter.features.has("shader-f16");
+  setStep("gpu", "done", `${adapter.info?.vendor || "GPU"} ${adapter.info?.architecture || ""}${f16 ? "" : " · no f16"}`.trim());
+  if (location.protocol === "file:") $("banners").innerHTML = `<div class="banner">Opened as a file, so models won't be cached. Run <code>python3 -m http.server</code> in this folder and open <code>http://localhost:8000</code>.</div>`;
+  navigator.storage?.persist?.();
+  setStep("runtime", "run");
+  [wasCached.asr, wasCached.llm] = await Promise.all([inCache(MODEL_IDS.asr), inCache(MODEL_IDS.llm)]);
+  status(wasCached.asr && wasCached.llm ? "Loading models from the browser cache…"
+    : "Downloading models. First visit only; later visits load from the browser cache.");
+
+  worker.postMessage({ type: "load-asr", model: CONFIG.asr.id, dtype: CONFIG.asr.dtype(f16), opts: CONFIG.asr.opts });
+  await whenReady("asr");
+  $("rec").disabled = false; $("rec").title = "Record (space)";
+  status("You can start dictating. The note writer is still loading; the note will be written once it's ready.");
+  worker.postMessage({ type: "load-llm", model: CONFIG.llm.id, dtype: CONFIG.llm.dtype(f16) });
+  await whenReady("llm");
+  clearInterval(elapsedTimer);
+  const total = performance.now() - loadStart;
+  timings["Page open → fully ready"] = fmtS(total);
+  showTimings();
+  $("loader").querySelector("h2 span").textContent = "Ready";
+  setTimeout(() => { $("loader").hidden = true; }, 2500);
+  if (!rec && !busy) status(`Ready in ${fmtS(total)}. Press the button or space bar and dictate.`);
+}
+
+// ---------- audio → 16 kHz chunks split at pauses ----------
+const SR = 16000, MIN = 6 * SR, MAX = 25 * SR;
+const rms = (a, s = 0, e = a.length) => { let x = 0; for (let i = s; i < e; i++) x += a[i] * a[i]; return Math.sqrt(x / Math.max(1, e - s)); };
+function quietest(buf, from, to) {
+  let best = to, bestE = Infinity;
+  for (let i = from; i + 4800 <= to; i += 480) { const e = rms(buf, i, i + 4800); if (e < bestE) { bestE = e; best = i + 2400; } }
+  return best;
+}
+function downsample(x, rate) {
+  if (rate === SR) return x;
+  const r = rate / SR, out = new Float32Array(Math.floor(x.length / r));
+  for (let i = 0; i < out.length; i++) { const a = Math.floor(i * r), b = Math.floor((i + 1) * r); let s = 0; for (let j = a; j < b; j++) s += x[j]; out[i] = s / (b - a); }
+  return out;
+}
+class Chunker {
+  buf = new Float32Array(SR * 60); len = 0;
+  constructor(onChunk) { this.onChunk = onChunk; }
+  push(x) {
+    if (this.len + x.length > this.buf.length) { const b = new Float32Array(this.buf.length * 2); b.set(this.buf.subarray(0, this.len)); this.buf = b; }
+    this.buf.set(x, this.len); this.len += x.length;
+    if (this.len >= MAX) this.cut(quietest(this.buf, MIN, MAX));
+    else if (this.len >= MIN && rms(this.buf, this.len - 0.6 * SR, this.len) < 0.008) this.cut(this.len - 0.3 * SR);
+  }
+  cut(at) { const c = this.buf.slice(0, at); this.buf.copyWithin(0, at, this.len); this.len -= at; this.onChunk(c); }
+  flush() { if (this.len > 0.3 * SR) this.cut(this.len); this.len = 0; }
+}
+
+let queue = Promise.resolve(), audioSecs = 0, asrMs = 0, lastChunkDone = 0;
+function enqueue(chunk) {
+  if (rms(chunk) < 0.004) return; // skip silence
+  queue = queue.then(async () => {
+    const r = await call({ type: "transcribe", audio: chunk }, [chunk.buffer]);
+    audioSecs += r.secs; asrMs += r.ms; lastChunkDone = performance.now();
+    if (r.text && !/^(thank you\.?|thanks for watching!?|you|\.|\[.*\]|\(.*\))$/i.test(r.text)) { const t = $("transcript"); t.value = (t.value.trimEnd() + " " + r.text).trim(); t.scrollTop = t.scrollHeight; }
+    timings["Transcription speed"] = `${(audioSecs / (asrMs / 1000)).toFixed(1)}× real time (${audioSecs.toFixed(0)} s audio in ${fmtS(asrMs)})`;
+    showTimings();
+  }).catch((e) => status("Transcription error: " + e.message));
+}
+
+let rec = null;
+async function start() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
+  const ctx = new AudioContext();
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([$("worklet-src").textContent], { type: "text/javascript" })));
+  const tap = new AudioWorkletNode(ctx, "tap");
+  const chunker = new Chunker(enqueue);
+  let level = 0;
+  tap.port.onmessage = ({ data }) => { level = Math.max(level * 0.85, rms(data) * 6); chunker.push(downsample(data, ctx.sampleRate)); };
+  ctx.createMediaStreamSource(stream).connect(tap);
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    $("timer").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    $("meter").firstElementChild.style.width = Math.min(100, level * 100) + "%";
+  }, 80);
+  rec = { stream, ctx, chunker, tick };
+  $("rec").classList.add("on");
+  status("Listening… text appears each time you pause.");
+}
+async function stop() {
+  const r = rec; rec = null;
+  $("rec").classList.remove("on"); clearInterval(r.tick); $("meter").firstElementChild.style.width = "0";
+  r.stream.getTracks().forEach((t) => t.stop()); await r.ctx.close();
+  const stopAt = performance.now();
+  r.chunker.flush(); status("Finishing transcription…");
+  await queue;
+  timings["Stop → transcript complete"] = fmtS(Math.max(0, lastChunkDone - stopAt));
+  await writeNote(stopAt);
+}
+$("rec").onclick = () => (rec ? stop() : start()).catch((e) => status("Microphone error: " + e.message));
+addEventListener("keydown", (e) => { if (e.code === "Space" && e.target === document.body && !$("rec").disabled) { e.preventDefault(); $("rec").click(); } });
+
+// Drag an audio file onto the page to transcribe it.
+addEventListener("dragover", (e) => e.preventDefault());
+addEventListener("drop", (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !$("rec").disabled) transcribeFile(f); });
+async function transcribeFile(file) {
+  const decoded = await new OfflineAudioContext(1, 1, SR).decodeAudioData(await file.arrayBuffer());
+  const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * SR), SR);
+  const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+  const pcm = (await off.startRendering()).getChannelData(0);
+  status(`Transcribing ${decoded.duration.toFixed(0)} s of audio…`);
+  const c = new Chunker(enqueue);
+  for (let i = 0; i < pcm.length; i += SR) c.push(pcm.slice(i, i + SR));
+  const stopAt = performance.now(); c.flush(); await queue;
+  timings["File → transcript complete"] = fmtS(performance.now() - stopAt);
+  await writeNote(stopAt);
+}
+window.transcribeFile = transcribeFile; // test hook
+
+// ---------- deterministic pre-clean (kept in sync with eval/prep.mjs) ----------
+// Deterministic pre-clean before the LLM: fillers, and fuzzy-matching drug names against a lexicon.
+const DRUGS = `amlodipine atenolol bisoprolol propranolol metoprolol carvedilol nebivolol ramipril lisinopril perindopril enalapril losartan candesartan irbesartan valsartan
+atorvastatin simvastatin rosuvastatin pravastatin ezetimibe aspirin clopidogrel ticagrelor prasugrel apixaban rivaroxaban edoxaban dabigatran warfarin heparin enoxaparin
+furosemide bumetanide bendroflumethiazide indapamide spironolactone eplerenone digoxin amiodarone doxazosin isosorbide nicorandil ranolazine ivabradine sacubitril
+metformin gliclazide sitagliptin linagliptin alogliptin empagliflozin dapagliflozin canagliflozin semaglutide liraglutide dulaglutide tirzepatide insulin pioglitazone
+levothyroxine carbimazole prednisolone hydrocortisone dexamethasone omeprazole lansoprazole esomeprazole pantoprazole ranitidine famotidine
+paracetamol ibuprofen naproxen diclofenac codeine dihydrocodeine tramadol morphine oxycodone buprenorphine fentanyl gabapentin pregabalin amitriptyline nortriptyline duloxetine
+sertraline citalopram escitalopram fluoxetine paroxetine mirtazapine venlafaxine trazodone quetiapine olanzapine risperidone aripiprazole lithium lamotrigine levetiracetam sodium valproate carbamazepine
+methylphenidate lisdexamfetamine atomoxetine guanfacine dexamfetamine melatonin zopiclone diazepam lorazepam
+amoxicillin flucloxacillin phenoxymethylpenicillin clarithromycin erythromycin azithromycin doxycycline nitrofurantoin trimethoprim cefalexin ciprofloxacin metronidazole co-amoxiclav
+salbutamol terbutaline beclometasone budesonide fluticasone formoterol salmeterol tiotropium montelukast prednisone
+allopurinol colchicine febuxostat methotrexate hydroxychloroquine sulfasalazine alendronic finasteride tamsulosin oxybutynin mirabegron sildenafil
+folic ferrous cetirizine loratadine fexofenadine chlorphenamine ondansetron metoclopramide cyclizine prochlorperazine senna lactulose macrogol loperamide mebeverine`.split(/\s+/);
+
+
+/** Replace runs of 1–4 words that sound/spell like a lexicon drug. Returns { text, fixes }. */
+function fixDrugs(text) {
+  const toks = text.split(/(\s+)/); // keep whitespace tokens
+  const words = []; toks.forEach((t, i) => { if (!/^\s*$/.test(t)) words.push(i); });
+  const fixes = [];
+  for (let w = 0; w < words.length; w++) {
+    let best = null;
+    for (let n = 4; n >= 1; n--) {
+      if (w + n > words.length) continue;
+      const span = words.slice(w, w + n).map((i) => toks[i]);
+      // Only plain words may merge into a drug name: never swallow numbers or units, and punctuation only at the end.
+      if (!span.every((t, k) => /^[A-Za-z'-]+$/.test(t) || (k === n - 1 && /^[A-Za-z'-]+[.,;:!?]+$/.test(t)))) continue;
+      if (/^(mg|mcg|ml|units?|milligrams?|micrograms?|grams?)$/i.test(span[n - 1].replace(/[.,;:!?]+$/, ""))) continue;
+      const trail = span[n - 1].match(/[.,;:!?]+$/)?.[0] ?? "";
+      const joined = span.join("").toLowerCase().replace(/[^a-z]/g, "");
+      if (joined.length < 6) continue;
+      if (DRUGS.includes(joined)) { if (n > 1) best = { n, drug: joined, trail, dist: 0 }; break; }
+      for (const d of DRUGS) {
+        if (Math.abs(d.length - joined.length) > 3 || d[0] !== joined[0] && n === 1) continue;
+        const x = lev(joined, d);
+        if (x <= Math.floor(d.length * 0.25) && (!best || x < best.dist)) best = { n, drug: d, trail, dist: x };
+      }
+      if (best) break;
+    }
+    if (best) {
+      const span = words.slice(w, w + best.n);
+      const from = span.map((i) => toks[i]).join(" ");
+      toks[span[0]] = best.drug + best.trail;
+      for (let k = span[0] + 1; k <= span[span.length - 1]; k++) toks[k] = "";
+      if (from.replace(/[.,;:!?]+$/, "").toLowerCase() !== best.drug) fixes.push(`${from} → ${best.drug}`);
+      w += best.n - 1;
+    }
+  }
+  return { text: toks.join("").replace(/[ \t]{2,}/g, " "), fixes };
+}
+
+function preclean(t) {
+  t = t.replace(/\b(um+|uh+|er+|erm+|ah+)\b[,.]?\s*/gi, "");
+  t = t.replace(/\b(\w+)( \1\b)+/gi, "$1"); // "the the" → "the"
+  return fixDrugs(t);
+}
+
+/** "scratch that" / "delete that": remove the preceding clause (back to the nearest . , ; or "and"). */
+function applyScratch(t) {
+  const re = /[,.;]?\s*\b(scratch that|delete that|strike that)\b[.,;]?\s*/i;
+  let m;
+  while ((m = re.exec(t))) {
+    const before = t.slice(0, m.index), after = t.slice(m.index + m[0].length);
+    let lastAnd = -1; for (const a of before.matchAll(/\s+and\s+/gi)) lastAnd = a.index;
+    const cut = Math.max(before.lastIndexOf(". "), before.lastIndexOf(".\n"), before.lastIndexOf(", "), before.lastIndexOf("; "), lastAnd);
+    const kept = cut >= 0 ? before.slice(0, cut + 1).replace(/\s+and$/i, "") : "";
+    t = (kept.trimEnd().replace(/[,;]$/, "") + (kept ? ". " : "") + after).trim();
+  }
+  return t;
+}
+
+// ---------- note ----------
+// Formal prose uses a conservative "tidy" prompt: in testing, asking a 0.8B model to rewrite freely made it invent facts on messy audio.
+const TIDY = `Tidy this clinician's dictation into a clean clinical note.
+Keep their sentences, facts and order. Fix grammar and punctuation, make the wording formal, and use British spelling.
+Do not add, interpret, explain or summarise anything. Never mention the dictation or the speaker.
+If a phrase makes no sense, keep it and add [?] after it.
+Reply with the note only.`;
+const STYLES = {
+  soap: "Organise it as a SOAP note with the headings Subjective, Objective, Assessment and Plan. If nothing was dictated for a heading, write 'Not documented.'",
+  letter: "Write it as a clinic letter to the patient's GP: 'Dear Dr …,' (use a dictated name if given), formal paragraphs, ending 'Yours sincerely,'.",
+};
+const system = () => $("style").value === "prose" ? TIDY : `You are a clinical documentation assistant. You receive the raw speech-recognition transcript of a clinician's dictation.
+${STYLES[$("style").value]}
+Use British spelling.
+Strict rules:
+1. Use only information in the transcript. Never add findings, diagnoses, history, doses, values, dates or advice that were not dictated.
+2. Keep every number, dose, unit, frequency, laterality (left/right) and negation (no, denies, not, without) exactly as dictated.
+3. Remove false starts.
+4. Correct a misheard medical term only when the intended term is unambiguous. If unsure, keep the words and add [?] after them.
+5. Write the note itself, as the clinician. Never mention the transcript, the speaker, the dictation or the text. If part of it makes no sense, keep those words and add [?] after them rather than guessing.
+Output only the note.`;
+
+// Unambiguous spoken punctuation is applied in code; only "scratch that" is left to the model.
+function applyCommands(t) {
+  return t
+    .replace(/[,.]?\s*\bfull stop\b[.,]?/gi, ".")
+    .replace(/\s*\bnew paragraph\b[.,]?\s*/gi, "\n\n")
+    .replace(/\s*\bnew line\b[.,]?\s*/gi, "\n")
+    .replace(/,?\s*\bcomma\b[.,]?/gi, ",")
+    .replace(/\.\s*\./g, ".").replace(/[ \t]+\n/g, "\n").trim();
+}
+
+/** Everything code can do before the model: spoken punctuation, "scratch that", fillers, drug names. */
+function cleaned() { return preclean(applyScratch(applyCommands($("transcript").value))); }
+
+let busy = false;
+async function writeNote(t0 = performance.now()) {
+  const transcript = cleaned().text;
+  if (!transcript || busy) return;
+  busy = true; $("rec").disabled = true; $("checks").hidden = true;
+  try {
+    if (!isReady.llm) {
+      status("Transcript done. Waiting for the note writer to finish loading (see the checklist above)…");
+      await whenReady("llm");
+    }
+    let text = ""; const note = $("note"); note.textContent = "";
+    status("Writing note…");
+    const id = nextId;
+    streams.set(id, (t) => { text += t; note.textContent = text.trimStart(); });
+    const r = await call({ type: "generate", messages: [{ role: "system", content: system() }, { role: "user", content: "Transcript:\n" + transcript }] });
+    streams.delete(id);
+    timings["Note: first word"] = `${fmtS(r.ttftMs)} (${r.promptTokens}-token prompt)`;
+    timings["Note: generation"] = `${r.tps.toFixed(1)} tokens/s, ${r.tokens} tokens`;
+    timings["Stop → note finished"] = fmtS(performance.now() - t0);
+    showTimings();
+    status("Done. Read the note before using it.");
+    verify();
+  } catch (e) { status("Formatting error: " + e.message); }
+  finally { busy = false; $("rec").disabled = !isReady.asr; }
+}
+$("redo").onclick = () => writeNote();
+$("copy").onclick = async () => { await navigator.clipboard.writeText($("note").innerText); status("Copied."); };
+
+// ---------- safety check: numbers, laterality, negations ----------
+const N = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+function numbers(text) {
+  // Spoken numbers to digits: "one hundred and twenty five" → 125, "two point five" → 2.5
+  const words = text.toLowerCase().replace(/(\d),(\d{3})/g, "$1$2").split(/[\s-]+/);
+  const out = []; let cur = null, dec = null;
+  const flush = () => { if (cur !== null) out.push(dec ? parseFloat(`${cur}.${dec}`) : cur); cur = null; dec = null; };
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i].replace(/[.,;:()]+$/g, ""), end = /[.,;:]$/.test(words[i]);
+    if (w in N) { if (dec !== null) dec += N[w]; else cur = (cur ?? 0) + N[w]; }
+    else if (w === "hundred" && cur !== null) cur *= 100;
+    else if (w === "thousand" && cur !== null) cur *= 1000;
+    else if (w === "and" && cur !== null && words[i + 1] in N) continue;
+    else if (w === "point" && cur !== null && dec === null) dec = "";
+    else { flush(); for (const m of w.match(/\d+(?:\.\d+)?/g) ?? []) out.push(parseFloat(m)); }
+    if (end) flush();
+  }
+  flush();
+  return new Set(out.map(String));
+}
+const count = (s, re) => (s.match(re) ?? []).length;
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+// Drug names: stems for common classes plus frequently prescribed names that have no class stem.
+const DRUG_RE = /\b(?:[a-z]{2,}(?:olol|pril|sartan|statin|azole|cillin|mycin|cycline|floxacin|parin|xaban|gatran|gliflozin|gliptin|glutide|dipine|semide|thiazide|prazole|tidine|triptan|setron|lukast|zepam|oxetine|mab|nib)|metformin|warfarin|aspirin|clopidogrel|ticagrelor|insulin|paracetamol|ibuprofen|naproxen|codeine|morphine|oxycodone|tramadol|levothyroxine|prednisolone|digoxin|amiodarone|spironolactone|gabapentin|pregabalin|sertraline|citalopram|salbutamol|allopurinol|colchicine|methotrexate|nitrofurantoin|trimethoprim)\b/gi;
+function lev(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+/** For each drug named in the note but not in the transcript: was it a spelling fix of something heard, or new? */
+function drugChanges(src, out) {
+  const words = src.toLowerCase().match(/[a-z]+/g) ?? [];
+  const candidates = new Set([...words, ...words.slice(1).map((w, i) => words[i] + w)]); // "by soprolol" → "bysoprolol"
+  const res = [];
+  for (const drug of new Set((out.match(DRUG_RE) ?? []).map((d) => d.toLowerCase()))) {
+    if (candidates.has(drug)) continue;
+    let best = null, bestD = Infinity;
+    for (const c of candidates) { if (Math.abs(c.length - drug.length) > 3) continue; const x = lev(drug, c); if (x < bestD) { bestD = x; best = c; } }
+    res.push({ drug, heard: best, corrected: bestD <= Math.max(2, Math.floor(drug.length * 0.2)) });
+  }
+  return res;
+}
+
+function verify() {
+  const pre = cleaned(), src = pre.text, out = $("note").innerText;
+  const a = numbers(src), b = numbers(out);
+  const added = [...b].filter((n) => !a.has(n)), dropped = [...a].filter((n) => !b.has(n));
+  const issues = [];
+  if (added.length) issues.push(`Numbers not in the transcript: <b>${added.join(", ")}</b> (highlighted)`);
+  if (dropped.length) issues.push(`Dictated numbers missing from the note: <b>${dropped.join(", ")}</b>`);
+  for (const side of ["left", "right", "bilateral"]) {
+    const re = new RegExp(`\\b${side}\\b`, "gi"), x = count(src, re), y = count(out, re);
+    if (x !== y) issues.push(`“${side}” said ${x}×, written ${y}×`);
+  }
+  const neg = /\b(no|not|denies|denied|without|negative|nil|absent)\b/gi;
+  if (count(out, neg) < count(src, neg)) issues.push(`Fewer negations in the note (${count(out, neg)}) than dictated (${count(src, neg)})`);
+  const drugs = drugChanges(src, out), infos = [];
+  for (const d of drugs) {
+    if (d.corrected) infos.push(`Drug name corrected: <b>${esc(d.drug)}</b> (heard “${esc(d.heard)}”)`);
+    else issues.push(`Drug not in the transcript: <b>${esc(d.drug)}</b> (highlighted)`);
+  }
+  if (/\b(scratch|delete|strike) that\b/i.test($("transcript").value)) issues.push(`“Scratch that” was applied automatically: check the right words were removed`);
+  for (const f of pre.fixes) infos.push(`Drug name matched: ${esc(f)}`);
+  // Highlight numbers and drugs the transcript doesn't support.
+  const flagDrugs = new Set(drugs.filter((d) => !d.corrected).map((d) => d.drug));
+  if (added.length || flagDrugs.size) $("note").innerHTML = esc(out)
+    .replace(/\d+(?:\.\d+)?/g, (m) => added.includes(String(parseFloat(m))) ? `<mark title="Not in transcript">${m}</mark>` : m)
+    .replace(/[A-Za-z]+/g, (w) => flagDrugs.has(w.toLowerCase()) ? `<mark title="Drug not in transcript">${w}</mark>` : w);
+  $("checks").hidden = false;
+  const info = infos.length ? `<ul class="small">${infos.map((i) => `<li>${i}</li>`).join("")}</ul>` : "";
+  $("checks").innerHTML = (issues.length
+    ? `<span class="bad">⚠ Check before use:</span><ul>${issues.map((i) => `<li>${i}</li>`).join("")}</ul>`
+    : `<span class="ok">✓ Numbers, sides, negations and drug names match the transcript.</span>`) + info;
+}
+window.__verify = verify; window.__numbers = numbers; window.__applyCommands = applyCommands; window.__drugChanges = drugChanges;
+
+load().catch((e) => { status("Failed to load: " + e.message); console.error(e); });
+</script>
+</body>
+</html>
